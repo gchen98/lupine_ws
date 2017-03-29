@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<configuration>
+    <ports>
+        <service>8000</service>
+        <admin>8001</admin>
+    </ports>
+    <access_logs>conf/logback-access.xml</access_logs>
+    <show_paths>
+        <show>
+            <name>simpsons</name>
+            <path>/home/garyc/Videos/tv</path>
+            <filepattern>Simpsons_*mp4</filepattern>
+        </show>
+        <show>
+            <name>word world</name>
+            <path>/home/garyc/Videos/movies/word_world</path>
+            <filepattern>*.mp4</filepattern>
+        </show>
+        <show>
+            <name>last man on earth</name>
+            <path>/home/garyc/Videos/tv</path>
+            <filepattern>Last_Man_On_Earth_*mp4</filepattern>
+        </show>
+    </show_paths>
+</configuration>
