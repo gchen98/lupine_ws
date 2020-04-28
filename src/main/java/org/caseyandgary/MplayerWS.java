@@ -1,6 +1,5 @@
 package org.caseyandgary;
 
-
 import java.io.FileFilter;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -37,7 +36,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.io.filefilter.WildcardFileFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.caseyandgary.Configuration.ShowInfo;
+//import org.caseyandgary.Configuration.MovieInfo;
 
 
 import jersey.repackaged.com.google.common.collect.Lists;
@@ -45,7 +44,10 @@ import jersey.repackaged.com.google.common.collect.Lists;
 
 @Path("mplayer")
 public class MplayerWS {
-private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
+
+    private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
+    private final String MEDIA_TYPE_CHANNELS = "channels";
+    private final String MEDIA_TYPE_MOVIES = "movies";
 
     //private static Process mplayerProcess = null;
     private JMPlayer jMPlayer = null;
@@ -53,6 +55,7 @@ private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
     private enum Action{
         PLAY, LIST
     }
+
 
 
     class CallbackParams{
@@ -70,13 +73,14 @@ private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
         logger.trace("In constructor");
         jMPlayer = JMPlayer.getInstance();
         jMPlayer.setMPlayerPath("/usr/local/bin/mplayer");
+
     }
 
     @GET @Path("/stop")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response play() {
+    public Response stop() {
         Map<String,String> params = null;
-        Function<CallbackParams,Exception> playFile = 
+        Function<CallbackParams,Exception> stopFunc = 
         new Function<CallbackParams,Exception>(){
             @Override
             public Exception apply(CallbackParams cp){
@@ -90,8 +94,30 @@ private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
                 }
             }
         };
-        return executeHelper(playFile,params);
+        return executeHelper(stopFunc,params);
     }
+
+    @GET @Path("/reload")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response reload() {
+        Map<String,String> params = null;
+        Function<CallbackParams,Exception> reloadFunc = 
+        new Function<CallbackParams,Exception>(){
+            @Override
+            public Exception apply(CallbackParams cp){
+                try{
+                    logger.trace("Reloading movie list");
+                    Configuration.reload();
+                    cp.response.add("message","Reloaded movie list.");
+                    return null;
+                }catch(Exception ex){
+                    return ex;
+                }
+            }
+        };
+        return executeHelper(reloadFunc,params);
+    }
+
 
     @GET @Path("/seek")
     @Produces(MediaType.APPLICATION_JSON)
@@ -119,22 +145,44 @@ private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
 
     @GET @Path("/play")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response play(@QueryParam("file") String fileParam) {
+    public Response play(
+    @QueryParam("file") String fileParam, 
+    @QueryParam("type") String typeParam) {
         Map<String,String> params = new HashMap<String,String>();
+        final String typeKey = "type";
         final String fileKey = "file";
+        params.put(typeKey,typeParam);
         params.put(fileKey,fileParam);
         Function<CallbackParams,Exception> playFile = 
         new Function<CallbackParams,Exception>(){
             @Override
             public Exception apply(CallbackParams cp){
-                final String fileName = cp.params.get(fileKey);
-                logger.trace("Playing path {}",fileName);
+                final String typeName = cp.params.get(typeKey);
+                final String mediaName = cp.params.get(fileKey);
+                logger.trace("Playing path {} of type {}",mediaName,typeName);
                 try{
-                    //mplayerProcess = Runtime.getRuntime().exec("mplayer -slave -quiet -idle "+fileName);
-                    jMPlayer.open(new File(fileName));
+                    //mplayerProcess = Runtime.getRuntime().
+                    //exec("mplayer -slave -quiet -idle "+fileName);
+                    String pathName = null;
+                    if(typeName.equals(MEDIA_TYPE_CHANNELS)){
+                        String dvbPrefix = 
+                        Configuration.getConfiguration().
+                        getDvbPrefix();
+                        String channelName = 
+                        Configuration.getConfiguration().
+                        getChannelName(mediaName);
+                        pathName = dvbPrefix + channelName;
+                    }else{
+                        pathName = Configuration.getConfiguration().
+                        getMoviePath(mediaName);
+                    }
+                    logger.trace("As a precaution, closing existing process");
+                    jMPlayer.close();
+                    jMPlayer.open(pathName);
                     jMPlayer.setFullScreen();
                     jMPlayer.setVolume(100);
                     cp.response.add("message","OK");
+                    logger.trace("JMPlayer was opened.");
                     return null;
                 }catch(Exception ex){
                     return ex;
@@ -144,73 +192,93 @@ private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
         return executeHelper(playFile,params);
     }
 
-    @GET @Path("/show_info")
-    @Produces(MediaType.APPLICATION_JSON)
-    public Response showInfo(@QueryParam("show_name") String showNameParam) {
-        Map<String,String> params = new HashMap<String,String>();
-        final String showNameKey = "show_name";
-        params.put(showNameKey,showNameParam);
-        Function<CallbackParams,Exception> getShowName = 
-        new Function<CallbackParams,Exception>(){
-            @Override
-            public Exception apply(CallbackParams cp){
-                try{
-                    String showName = cp.params.get(showNameKey);
-                    if(showName!=null) showName = showName.toLowerCase();
-                    logger.trace("Getting info for show name {}",showName);
-                    ShowInfo showInfo = Configuration.getConfiguration().
-                    getShowInfo(showName);
-                    JsonArrayBuilder jsonList = Json.createArrayBuilder();
-                    if(showInfo!=null){
-                        File dir = new File(showInfo.path);
-                        FileFilter fileFilter = new WildcardFileFilter(showInfo.filePattern);
-                        logger.trace("Looking at base path {}.",dir.toString());
-                        File[] files = dir.listFiles(fileFilter);
-                        if(files!=null && files.length>0){
-                            Set<String> sortedFileNames = new TreeSet<String>();
-                            for(File file:files){
-                                sortedFileNames.add(file.toString());
-                                logger.trace("Added file {}",file.toString());
-                            }
-                            for(String fileName:sortedFileNames){
-                                jsonList.add(fileName);
-                            }
-                        }else{
-                            logger.trace("No files found.");
-                        }
-                    }
-                    cp.response.add("files",jsonList);
-                    cp.response.add("message","OK");
-                    return null;
-                }catch(Exception ex){
-                    return ex;
-                }
-            }
-        };
-        return executeHelper(getShowName,params);
-    }
+//    @GET @Path("/movie_info")
+//    @Produces(MediaType.APPLICATION_JSON)
+//    public Response movieInfo(@QueryParam("movie_name") String movieNameParam) {
+//        Map<String,String> params = new HashMap<String,String>();
+//        final String movieNameKey = "movie_name";
+//        params.put(movieNameKey,movieNameParam);
+//        Function<CallbackParams,Exception> getMovieName = 
+//        new Function<CallbackParams,Exception>(){
+//            @Override
+//            public Exception apply(CallbackParams cp){
+//                try{
+//                    String movieName = cp.params.get(movieNameKey);
+//                    if(movieName!=null) movieName = movieName.toLowerCase();
+//                    logger.trace("Getting info for movie name {}",movieName);
+//                    MovieInfo movieInfo = Configuration.getConfiguration().
+//                    getMovieInfo(movieName);
+//                    JsonArrayBuilder jsonList = Json.createArrayBuilder();
+//                    if(movieInfo!=null){
+//                        File dir = new File(movieInfo.path);
+//                        FileFilter fileFilter = new WildcardFileFilter(movieInfo.filePattern);
+//                        logger.trace("Looking at base path {}.",dir.toString());
+//                        File[] files = dir.listFiles(fileFilter);
+//                        if(files!=null && files.length>0){
+//                            Set<String> sortedFileNames = new TreeSet<String>();
+//                            for(File file:files){
+//                                sortedFileNames.add(file.toString());
+//                                logger.trace("Added file {}",file.toString());
+//                            }
+//                            for(String fileName:sortedFileNames){
+//                                jsonList.add(fileName);
+//                            }
+//                        }else{
+//                            logger.trace("No files found.");
+//                        }
+//                    }
+//                    cp.response.add("files",jsonList);
+//                    cp.response.add("message","OK");
+//                    return null;
+//                }catch(Exception ex){
+//                    return ex;
+//                }
+//            }
+//        };
+//        return executeHelper(getMovieName,params);
+//    }
 
     @GET @Path("/list")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response list() {
-        Map<String,String> params = null;
-        Function<CallbackParams,Exception> listShows = 
+    public Response list(@QueryParam("type") String typeParam) {
+        Map<String,String> params = new HashMap<String,String>();
+        final String typeKey = "type";
+        params.put(typeKey,typeParam);
+
+        Function<CallbackParams,Exception> listMedia = 
         new Function<CallbackParams,Exception>(){
             @Override
             public Exception apply(CallbackParams cp){
                 try{
-                    Collection<String> showNames = 
-                    Configuration.getConfiguration().getShows();
-                    JsonArrayBuilder jsonList = Json.createArrayBuilder();
-                    if(showNames!=null && showNames.size()>0){
-                        for(String showName:showNames){
-                            jsonList.add(showName);
-                            logger.trace("Added showname {}",showName);
+                    final String typeName = cp.params.get(typeKey);
+                    logger.trace("Selected media type {}",typeName);
+                    if(typeName.equalsIgnoreCase(MEDIA_TYPE_MOVIES)){
+                        Collection<String> movieNames = 
+                        Configuration.getConfiguration().getMovies();
+                        JsonArrayBuilder jsonList = Json.createArrayBuilder();
+                        if(movieNames!=null && movieNames.size()>0){
+                            for(String movieName:movieNames){
+                                jsonList.add(movieName);
+                                logger.trace("Added moviename {}",movieName);
+                            }
+                        }else{
+                            logger.trace("No movies found.");
                         }
-                    }else{
-                        logger.trace("No shows found.");
+                        cp.response.add("movies",jsonList);
+                    }else if(typeName.equalsIgnoreCase(MEDIA_TYPE_CHANNELS)){
+                        Collection<String> channelNames = 
+                        Configuration.getConfiguration().getChannels();
+                        JsonArrayBuilder jsonList = Json.createArrayBuilder();
+                        if(channelNames!=null && channelNames.size()>0){
+                            for(String channelName:channelNames){
+                                jsonList.add(channelName);
+                                logger.trace("Added channelname {}",channelName);
+                            }
+                        }else{
+                            logger.trace("No channels found.");
+                        }
+                        cp.response.add("channels",jsonList);
                     }
-                    cp.response.add("shows",jsonList);
                     cp.response.add("message","OK");
                     return null;
                 }catch(Exception ex){
@@ -218,7 +286,7 @@ private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
                 }
             }
         };
-        return executeHelper(listShows,params);
+        return executeHelper(listMedia,params);
     }
 
     private void handleException(JsonObjectBuilder metadata,Exception ex){

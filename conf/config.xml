@@ -1,25 +1,50 @@
 <?xml version="1.0" encoding="ISO-8859-1"?>
 <configuration>
     <ports>
-        <service>8000</service>
-        <admin>8001</admin>
+        <service>9000</service>
+        <admin>9001</admin>
     </ports>
+    <mplayer_options>-slave -idle -vo vdpau -ao sdl -framedrop</mplayer_options>
     <access_logs>conf/logback-access.xml</access_logs>
-    <show_paths>
-        <show>
-            <name>simpsons</name>
-            <path>/home/garyc/Videos/tv</path>
-            <filepattern>Simpsons_*mp4</filepattern>
-        </show>
-        <show>
-            <name>word world</name>
-            <path>/home/garyc/Videos/movies/word_world</path>
-            <filepattern>*.mp4</filepattern>
-        </show>
-        <show>
-            <name>last man on earth</name>
-            <path>/home/garyc/Videos/tv</path>
-            <filepattern>Last_Man_On_Earth_*mp4</filepattern>
-        </show>
-    </show_paths>
+    <dvb_prefix>dvb://1@</dvb_prefix>
+    <tv_channels>
+        <channel>
+            <name>KCBS</name>
+            <number>2.1</number>
+        </channel>
+        <channel>
+            <name>KNBC</name>
+            <number>4.1</number>
+        </channel>
+        <channel>
+            <name>KABC</name>
+            <number>7.1</number>
+        </channel>
+        <channel>
+            <name>KTTV</name>
+            <number>11.1</number>
+        </channel>
+        <channel>
+            <name>KCET</name>
+            <number>28.1</number>
+        </channel>
+        <channel>
+            <name>PBS-1</name>
+            <number>50.1</number>
+        </channel>
+        <channel>
+            <name>KLCS-2</name>
+            <number>58.2</number>
+        </channel>
+    </tv_channels>
+    <movies>
+        <movie>
+            <name>Spirited Away</name>
+            <path>/home/garyc/Videos/movies/beela/spirited_away/Spirited_Away_t03_h264.mkv</path>
+        </movie>
+        <movie>
+            <name>Daddy's Home 2</name>
+            <path>/home/garyc/Videos/movies/beela/daddys_home_2/daddys_home_2_aac.mp4</path>
+        </movie>
+    </movies>
 </configuration>

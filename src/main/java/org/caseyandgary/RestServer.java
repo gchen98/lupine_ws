@@ -60,6 +60,7 @@ public class RestServer {
             CommandLine cmd = parser.parse(options,args);
 
             String xmlConfigFile = cmd.getOptionValue("config");
+            logger.info("Using XML config at {}",xmlConfigFile);
 
             Configuration.setXmlPath(xmlConfigFile);
             Configuration config =  Configuration.getConfiguration(); 
@@ -76,13 +77,14 @@ public class RestServer {
             logger.info("Started HTTP Web service on port {}",servicePort);
             //start the servers
             apiServer.start();
+            logger.trace("API server joining.");
             apiServer.join();
-            logger.trace("API server joined.");
-
+            if(apiServer!=null) apiServer.destroy();
+            logger.trace("API server destroyed.");
         }catch(Exception ex){
             logger.error("Error in launching Jetty server:",ex);
         } finally {
-            if(apiServer!=null) apiServer.destroy();
+            logger.trace("Finally clause");
 
         }
 

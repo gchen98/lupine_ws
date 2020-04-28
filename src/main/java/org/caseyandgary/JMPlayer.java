@@ -1,8 +1,10 @@
 package org.caseyandgary;
 
 import java.io.*;
-import java.util.logging.Logger;
-import java.util.logging.Level;
+//import java.util.logging.Logger;
+//import java.util.logging.Level;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A player which is actually an interface to the famous MPlayer.
@@ -11,7 +13,7 @@ import java.util.logging.Level;
 public class JMPlayer {
 
     private static JMPlayer instance = null;
-    private static Logger logger = Logger.getLogger(JMPlayer.class.getName());
+    private static final Logger logger = LoggerFactory.getLogger(JMPlayer.class);
 
 
     /** A thread that reads from an input stream and outputs to another line by line. */
@@ -44,11 +46,11 @@ public class JMPlayer {
 
                 // read line by line
                 while ( (line = reader.readLine()) != null) {
-                    logger.info((prefix != null ? prefix : "") + line);
+                    //logger.trace((prefix != null ? prefix : "") + line);
                     printStream.println(line);
                 }
             } catch (IOException exc) {
-                logger.log(Level.WARNING, "An error has occured while grabbing lines", exc);
+                logger.warn("An error has occured while grabbing lines", exc);
             }
         }
 
@@ -74,6 +76,12 @@ public class JMPlayer {
     }
 
     private JMPlayer() {
+        try{
+            mplayerOptions = Configuration.getConfiguration().getMplayerOptions();
+        }catch(Exception e){
+            logger.warn( "Error in getting XML configuiation", e);
+        }
+        logger.info("Mplayer options are: "+mplayerOptions);
     }
 
     /** @return the path to the MPlayer executable. */
@@ -89,28 +97,38 @@ public class JMPlayer {
         this.mplayerPath = mplayerPath;
     }
 
-    public void open(File file) throws IOException {
-        String path = file.getAbsolutePath().replace('\\', '/');
+    public void open(String rawPath) throws IOException {
+    //public void open(File file) throws IOException {
+        //String path = file.getAbsolutePath().replace('\\', '/');
+        String path = rawPath.replace('\\', '/');
+	
         if (mplayerProcess == null) {
             // start MPlayer as an external process
-            String command =  mplayerPath  + " "+ mplayerOptions + " " + path + "";
-            //String command = "\"" + mplayerPath + "\" " + mplayerOptions + " \"" + path + "\"";
+            String command =  mplayerPath  + " "+ mplayerOptions + " " 
+            + path + "";
+            //String command = "\"" + mplayerPath + "\" " + mplayerOptions + 
+            //" \"" + path + "\"";
             logger.info("Starting MPlayer process: " + command);
             mplayerProcess = Runtime.getRuntime().exec(command);
 
-            // create the piped streams where to redirect the standard output and error of MPlayer
+            // create the piped streams where to redirect the standard output 
+            // and error of MPlayer
             // specify a bigger pipesize
             PipedInputStream  readFrom = new PipedInputStream(1024*1024);
             PipedOutputStream writeTo = new PipedOutputStream(readFrom);
             mplayerOutErr = new BufferedReader(new InputStreamReader(readFrom));
 
-            // create the threads to redirect the standard output and error of MPlayer
-            new LineRedirecter(mplayerProcess.getInputStream(), writeTo, "MPlayer says: ").start();
-            new LineRedirecter(mplayerProcess.getErrorStream(), writeTo, "MPlayer encountered an error: ").start();
+            // create the threads to redirect the standard output and 
+            // error of MPlayer
+            new LineRedirecter(mplayerProcess.getInputStream(), writeTo, 
+            "MPlayer STDOUT: ").start();
+            new LineRedirecter(mplayerProcess.getErrorStream(), writeTo, 
+            "MPlayer STDERR: ").start();
 
             // the standard input of MPlayer
             mplayerIn = new PrintStream(mplayerProcess.getOutputStream());
         } else {
+            logger.trace("Using existing mplayer process");
             execute("loadfile " + path + " 0");
             //execute("loadfile \"" + path + "\" 0");
         }
@@ -277,7 +295,8 @@ public class JMPlayer {
         JMPlayer jmPlayer = JMPlayer.getInstance();
         jmPlayer.setMPlayerPath("/usr/local/bin/mplayer");
         // open a video file
-        jmPlayer.open(new File("/home/garyc/Videos/tv/Simpsons_SAVE_2017_03_26.mp4"));
+        jmPlayer.open("/home/garyc/Videos/tv/Simpsons_SAVE_2017_03_26.mp4");
+        //jmPlayer.open(new File("/home/garyc/Videos/tv/Simpsons_SAVE_2017_03_26.mp4"));
         // skip 2 minutes
         //jmPlayer.setTimePosition(120);
         // skip 2 minutes

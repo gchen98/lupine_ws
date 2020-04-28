@@ -18,8 +18,8 @@
     </appender>
 
     <category name="org.caseyandgary" additivity="false">
-       <priority value="TRACE"/>
-        <appender-ref ref="CONSOLE"/>
+      <priority value="TRACE"/>
+      <appender-ref ref="FILE"/>
     </category>
 
     <root>
