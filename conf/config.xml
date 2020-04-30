@@ -4,9 +4,9 @@
         <service>9000</service>
         <admin>9001</admin>
     </ports>
-    <mplayer_options>-slave -idle -vo vdpau -ao sdl -framedrop</mplayer_options>
+    <mplayer_options>-slave -idle -vo vdpau -ao sdl -framedrop -softvol -softvol-max 2000 -af volume=10</mplayer_options>
     <access_logs>conf/logback-access.xml</access_logs>
-    <dvb_prefix>dvb://1@</dvb_prefix>
+    <recording_dir>/home/garyc/Videos/tmp/</recording_dir>
     <tv_channels>
         <channel>
             <name>KCBS</name>
@@ -17,8 +17,16 @@
             <number>4.1</number>
         </channel>
         <channel>
+            <name>KTLA</name>
+            <number>5.1</number>
+        </channel>
+        <channel>
             <name>KABC</name>
             <number>7.1</number>
+        </channel>
+        <channel>
+            <name>KCAL</name>
+            <number>9.1</number>
         </channel>
         <channel>
             <name>KTTV</name>
@@ -31,6 +39,22 @@
         <channel>
             <name>PBS-1</name>
             <number>50.1</number>
+        </channel>
+        <channel>
+            <name>PBS-2</name>
+            <number>50.2</number>
+        </channel>
+        <channel>
+            <name>PBS-3</name>
+            <number>50.3</number>
+        </channel>
+        <channel>
+            <name>PBS-4</name>
+            <number>50.4</number>
+        </channel>
+        <channel>
+            <name>KLCS-1</name>
+            <number>58.1</number>
         </channel>
         <channel>
             <name>KLCS-2</name>
@@ -46,5 +70,10 @@
             <name>Daddy's Home 2</name>
             <path>/home/garyc/Videos/movies/beela/daddys_home_2/daddys_home_2_aac.mp4</path>
         </movie>
+        <movie>
+            <name>African Cats</name>
+            <path>/home/garyc/Videos/movies/beela/african_cats/African_Cats_t00_h264.mkv</path>
+        </movie>
+        
     </movies>
 </configuration>

@@ -3,18 +3,39 @@ package org.caseyandgary;
 import java.io.*;
 //import java.util.logging.Logger;
 //import java.util.logging.Level;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * A player which is actually an interface to the famous MPlayer.
  * @author Adrian BER
+ * @author Gary Chen
  */
 public class JMPlayer {
 
+    public static enum MPLAYER_TYPE{
+        PLAY,RECORD
+    }
+
     private static JMPlayer instance = null;
     private static final Logger logger = LoggerFactory.getLogger(JMPlayer.class);
+    private static class Mplayer {
 
+        /** The process corresponding to MPlayer. */
+        private Process mplayerProcess;
+        /** The standard input for MPlayer where you can send commands. */
+        private PrintStream mplayerIn;
+        /** A combined reader for the the standard output and error of MPlayer. Used to read MPlayer responses. */
+        private BufferedReader mplayerOutErr;
+        /** A flag to notify when to write to the process's pipe */
+        private volatile boolean writeToPipe;
+
+        private Mplayer(){
+            writeToPipe = false;
+        }
+
+    }
 
     /** A thread that reads from an input stream and outputs to another line by line. */
     private static class LineRedirecter extends Thread {
@@ -24,36 +45,95 @@ public class JMPlayer {
         private OutputStream out;
         /** The prefix used to prefix the lines when outputting to the logger. */
         private String prefix;
+        /** Reference to the mplayer process */
+        private Mplayer mplayer;
 
         /**
          * @param in the input stream to read from.
          * @param out the output stream to write to.
          * @param prefix the prefix used to prefix the lines when outputting to the logger.
+         * @param mplayer reference to the mplayer process
          */
-        LineRedirecter(InputStream in, OutputStream out, String prefix) {
+        LineRedirecter(InputStream in, OutputStream out, String prefix, 
+        Mplayer mplayer) {
             this.in = in;
             this.out = out;
             this.prefix = prefix;
+            this.mplayer = mplayer;
         }
 
+        @Override
+        public void finalize() {
+            logger.trace("Called finalize on thread!");
+        }
+
+        @Override
         public void run()
         {
             try {
                 // creates the decorating reader and writer
-                BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+                BufferedReader reader = new BufferedReader(
+                new InputStreamReader(in));
                 PrintStream printStream = new PrintStream(out);
                 String line;
-
                 // read line by line
                 while ( (line = reader.readLine()) != null) {
-                    //logger.trace((prefix != null ? prefix : "") + line);
-                    printStream.println(line);
+                    if(mplayer.writeToPipe){
+                        printStream.println(line);
+                    }
                 }
-            } catch (IOException exc) {
+                logger.trace((prefix != null ? prefix : " finish loop ")  );
+            } catch (Exception exc) {
                 logger.warn("An error has occured while grabbing lines", exc);
             }
         }
 
+    }
+
+    /**
+    * a thread that will kill a mplayer process
+    */
+
+    private static class MplayerHalter
+    implements Runnable{
+
+        // reference to the enclosing class
+        JMPlayer jmplayer;
+        // reference to the specific mplayer instance
+        Mplayer mplayer;
+        // duration in seconds
+        int durationSeconds;
+
+        private MplayerHalter(JMPlayer jmplayer,Mplayer mplayer,
+        int durationSeconds){
+            this.jmplayer = jmplayer;
+            this.mplayer = mplayer;
+            this.durationSeconds = durationSeconds;
+        }
+
+        @Override
+        public void run(){
+            try{
+                logger.trace("Recording for {} seconds.", 
+                durationSeconds);
+                long pid = mplayer.mplayerProcess.pid();
+                logger.trace("PID is {}",pid);
+
+                Thread.sleep(durationSeconds*1000);
+                try{
+                    Runtime.getRuntime().exec("kill -SIGINT "+pid);
+                    mplayer.mplayerProcess.waitFor();
+                }catch(IOException e){
+                    logger.warn("Could not kill process, kill manually.");
+                    mplayer.mplayerProcess.waitFor(1,
+                    TimeUnit.SECONDS);
+                }
+                logger.trace("Recording done!");
+                mplayer.mplayerProcess = null;
+            }catch(InterruptedException e){
+                logger.warn("Interrupted Exception: ",e);
+            }
+        }
     }
 
     /** The path to the MPlayer executable. */
@@ -61,12 +141,23 @@ public class JMPlayer {
     /** Options passed to MPlayer. */
     private String mplayerOptions = "-slave -idle";
 
-    /** The process corresponding to MPlayer. */
-    private Process mplayerProcess;
-    /** The standard input for MPlayer where you can send commands. */
-    private PrintStream mplayerIn;
-    /** A combined reader for the the standard output and error of MPlayer. Used to read MPlayer responses. */
-    private BufferedReader mplayerOutErr;
+    private Mplayer playMplayer = null;
+    private Mplayer recordMplayer= null;
+
+    private Mplayer getMplayer(MPLAYER_TYPE mplayerType){
+        Mplayer mplayer =  null;
+        switch(mplayerType){
+            case PLAY:
+                mplayer = playMplayer;
+                break;
+            case RECORD:
+                mplayer = recordMplayer;
+                break;
+                
+        }
+        return mplayer;
+    }
+
 
     public static JMPlayer getInstance(){
         if(instance==null){
@@ -77,7 +168,10 @@ public class JMPlayer {
 
     private JMPlayer() {
         try{
-            mplayerOptions = Configuration.getConfiguration().getMplayerOptions();
+            mplayerOptions = Configuration.getConfiguration().
+            getMplayerOptions();
+            playMplayer = new Mplayer();
+            recordMplayer = new Mplayer();
         }catch(Exception e){
             logger.warn( "Error in getting XML configuiation", e);
         }
@@ -97,110 +191,173 @@ public class JMPlayer {
         this.mplayerPath = mplayerPath;
     }
 
-    public void open(String rawPath) throws IOException {
-    //public void open(File file) throws IOException {
+    public void open(MPLAYER_TYPE mplayerType,String rawPath) 
+    throws IOException {
+        Mplayer mplayer = getMplayer(mplayerType);
         //String path = file.getAbsolutePath().replace('\\', '/');
         String path = rawPath.replace('\\', '/');
 	
-        if (mplayerProcess == null) {
+        if (mplayer.mplayerProcess == null) {
             // start MPlayer as an external process
             String command =  mplayerPath  + " "+ mplayerOptions + " " 
             + path + "";
-            //String command = "\"" + mplayerPath + "\" " + mplayerOptions + 
-            //" \"" + path + "\"";
+
             logger.info("Starting MPlayer process: " + command);
-            mplayerProcess = Runtime.getRuntime().exec(command);
+
+            //Process process = Runtime.getRuntime().exec(command);
+            mplayer.mplayerProcess = Runtime.getRuntime().exec(command);
 
             // create the piped streams where to redirect the standard output 
             // and error of MPlayer
             // specify a bigger pipesize
             PipedInputStream  readFrom = new PipedInputStream(1024*1024);
             PipedOutputStream writeTo = new PipedOutputStream(readFrom);
-            mplayerOutErr = new BufferedReader(new InputStreamReader(readFrom));
+            mplayer.mplayerOutErr = new BufferedReader(
+            new InputStreamReader(readFrom));
 
             // create the threads to redirect the standard output and 
             // error of MPlayer
-            new LineRedirecter(mplayerProcess.getInputStream(), writeTo, 
-            "MPlayer STDOUT: ").start();
-            new LineRedirecter(mplayerProcess.getErrorStream(), writeTo, 
-            "MPlayer STDERR: ").start();
+            new LineRedirecter(mplayer.mplayerProcess.getInputStream(), 
+            writeTo, "MPlayer STDOUT: ",mplayer).start();
+            new LineRedirecter(mplayer.mplayerProcess.getErrorStream(), 
+            writeTo, "MPlayer STDERR: ",mplayer).start();
 
             // the standard input of MPlayer
-            mplayerIn = new PrintStream(mplayerProcess.getOutputStream());
+            mplayer.mplayerIn = new PrintStream(
+            mplayer.mplayerProcess.getOutputStream());
         } else {
             logger.trace("Using existing mplayer process");
-            execute("loadfile " + path + " 0");
-            //execute("loadfile \"" + path + "\" 0");
+            execute(mplayer,"loadfile " + path + " 0");
         }
         // wait to start playing
-        waitForAnswer("Starting playback...");
+        waitForAnswer(mplayer,"Starting playback...");
         logger.info("Started playing file " + path);
     }
 
-    public void close() {
-        if (mplayerProcess != null) {
-            execute("quit");
-            try {
-                mplayerProcess.waitFor();
-            }
-            catch (InterruptedException e) {}
-            mplayerProcess = null;
+    public boolean record(MPLAYER_TYPE mplayerType,String inputPath, 
+    String outputPath,int durationSeconds) 
+    throws IOException {
+        Mplayer mplayer = getMplayer(mplayerType);
+        outputPath = outputPath.replace('\\', '/');
+        String recordingDir = Configuration.getConfiguration().
+        getRecordingDir();
+        String dumpFile = recordingDir + outputPath;
+	
+        if (mplayer.mplayerProcess == null) {
+            // start MPlayer as an external process
+            String command =  mplayerPath  + " -slave -idle -dumpstream " +
+            inputPath + " -dumpfile " + dumpFile;
+            //String command =  mplayerPath  + " -slave -idle " +
+            //inputPath ;
+            logger.info("Starting MPlayer process: " + command);
+            mplayer.mplayerProcess = Runtime.getRuntime().exec(command);
+
+            // create the piped streams where to redirect the standard output 
+            // and error of MPlayer
+            // specify a bigger pipesize
+            PipedInputStream  readFrom = new PipedInputStream(1024*1024);
+            PipedOutputStream writeTo = new PipedOutputStream(readFrom);
+            mplayer.mplayerOutErr = new BufferedReader(
+            new InputStreamReader(readFrom));
+
+            // create the threads to redirect the standard output and 
+            // error of MPlayer
+            new LineRedirecter(mplayer.mplayerProcess.getInputStream(),
+            writeTo, "MPlayer STDOUT: ",mplayer).start();
+            new LineRedirecter(mplayer.mplayerProcess.getErrorStream(),
+            writeTo, "MPlayer STDERR: ",mplayer).start();
+
+            // the standard input of MPlayer
+            mplayer.mplayerIn = new PrintStream(
+            mplayer.mplayerProcess.getOutputStream());
+            // wait to start playing
+            //waitForAnswer(mplayer,"Starting playback...");
+            waitForAnswer(mplayer,"dump:");
+            logger.info("Started recording file " + outputPath);
+            new Thread(new MplayerHalter(this,mplayer,durationSeconds)).start();
+            return true;
+        } else {
+            logger.trace("Not going to use existing mplayer process "+
+            "until it is null");
+            return false;
         }
     }
 
-    public File getPlayingFile() {
-        String path = getProperty("path");
+    public void close(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        if (mplayer.mplayerProcess != null) {
+            execute(mplayer,"quit");
+            try {
+                mplayer.mplayerProcess.waitFor();
+            }
+            catch (InterruptedException e) {}
+            mplayer.mplayerProcess = null;
+        }
+    }
+
+    public File getPlayingFile(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        String path = getProperty(mplayer,"path");
         return path == null ? null : new File(path);
     }
 
-    public void togglePlay() {
-        execute("pause");
+    public void togglePlay(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        execute(mplayer,"pause");
     }
 
-    public void setFullScreen() {
-        execute("vo_fullscreen 1");
+    public void setFullScreen(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        execute(mplayer,"vo_fullscreen 1");
     }
 
-    public void seek(long seconds){
+    public void seek(MPLAYER_TYPE mplayerType,long seconds){
         // second argument to seek is seek type:
         //    Seek to some place in the movie.
         //        0 is a relative seek of +/- <value> seconds (default).
         //        1 is a seek to <value> % in the movie.
         //        2 is a seek to an absolute position of <value> seconds.
-        execute("seek "+seconds+" 0");
+        Mplayer mplayer = getMplayer(mplayerType);
+        execute(mplayer,"seek "+seconds+" 0");
     }
 
-    public boolean isPlaying() {
-        return mplayerProcess != null;
+    public boolean isPlaying(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        return mplayer.mplayerProcess != null;
     }
 
-    public long getTimePosition() {
-        return getPropertyAsLong("time_pos");
+    public long getTimePosition(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        return getPropertyAsLong(mplayer,"time_pos");
     }
 
-    public void setTimePosition(long seconds) {
-        setProperty("time_pos", seconds);
+    public void setTimePosition(MPLAYER_TYPE mplayerType,long seconds) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        setProperty(mplayer,"time_pos", seconds);
     }
 
 
-    public long getTotalTime() {
-        return getPropertyAsLong("length");
+    public long getTotalTime(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        return getPropertyAsLong(mplayer,"length");
     }
 
-    public float getVolume() {
-        return getPropertyAsFloat("volume");
+    public float getVolume(MPLAYER_TYPE mplayerType) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        return getPropertyAsFloat(mplayer,"volume");
     }
 
-    public void setVolume(float volume) {
-        setProperty("volume", volume);
+    public void setVolume(MPLAYER_TYPE mplayerType, float volume) {
+        Mplayer mplayer = getMplayer(mplayerType);
+        setProperty(mplayer,"volume", volume);
     }
 
-    protected String getProperty(String name) {
-        if (name == null || mplayerProcess == null) {
+    protected String getProperty(Mplayer mplayer, String name) {
+        if (name == null || mplayer.mplayerProcess == null) {
             return null;
         }
         String s = "ANS_" + name + "=";
-        String x = execute("get_property " + name, s);
+        String x = execute(mplayer,"get_property " + name, s);
         if (x == null)
             return null;
         if (!x.startsWith(s))
@@ -208,41 +365,41 @@ public class JMPlayer {
         return x.substring(s.length());
     }
 
-    protected long getPropertyAsLong(String name) {
+    protected long getPropertyAsLong(Mplayer mplayer,String name) {
         try {
-            return Long.parseLong(getProperty(name));
+            return Long.parseLong(getProperty(mplayer,name));
         }
         catch (NumberFormatException exc) {}
         catch (NullPointerException exc) {}
         return 0;
     }
 
-    protected float getPropertyAsFloat(String name) {
+    protected float getPropertyAsFloat(Mplayer mplayer,String name) {
         try {
-            return Float.parseFloat(getProperty(name));
+            return Float.parseFloat(getProperty(mplayer,name));
         }
         catch (NumberFormatException exc) {}
         catch (NullPointerException exc) {}
         return 0f;
     }
 
-    protected void setProperty(String name, String value) {
-        execute("set_property " + name + " " + value);
+    protected void setProperty(Mplayer mplayer,String name, String value) {
+        execute(mplayer,"set_property " + name + " " + value);
     }
 
-    protected void setProperty(String name, long value) {
-        execute("set_property " + name + " " + value);
+    protected void setProperty(Mplayer mplayer,String name, long value) {
+        execute(mplayer,"set_property " + name + " " + value);
     }
 
-    protected void setProperty(String name, float value) {
-        execute("set_property " + name + " " + value);
+    protected void setProperty(Mplayer mplayer,String name, float value) {
+        execute(mplayer,"set_property " + name + " " + value);
     }
 
     /** Sends a command to MPlayer..
      * @param command the command to be sent
      */
-    private void execute(String command) {
-        execute(command, null);
+    private void execute(Mplayer mplayer,String command) {
+        execute(mplayer,command, null);
     }
 
     /** Sends a command to MPlayer and waits for an answer.
@@ -250,16 +407,17 @@ public class JMPlayer {
      * @param expected the string with which has to start the line; if null don't wait for an answer
      * @return the MPlayer answer
      */
-    private String execute(String command, String expected) {
-        if (mplayerProcess != null) {
-            logger.info("Send to MPlayer the command \"" + command + "\" and expecting "
-                    + (expected != null ? "\"" + expected + "\"" : "no answer"));
-            mplayerIn.print(command);
-            mplayerIn.print("\n");
-            mplayerIn.flush();
+    private String execute(Mplayer mplayer, String command, String expected) {
+        if (mplayer.mplayerProcess != null) {
+            logger.info("Send to MPlayer the command \"" + 
+            command + "\" and expecting " + (expected != null ? "\"" 
+            + expected + "\"" : "no answer"));
+            mplayer.mplayerIn.print(command);
+            mplayer.mplayerIn.print("\n");
+            mplayer.mplayerIn.flush();
             logger.info("Command sent");
             if (expected != null) {
-                String response = waitForAnswer(expected);
+                String response = waitForAnswer(mplayer,expected);
                 logger.info("MPlayer command response: " + response);
                 return response;
             }
@@ -271,18 +429,20 @@ public class JMPlayer {
      * @param expected the expected starting string for the line
      * @return the entire line from the standard output or error of MPlayer
      */
-    private String waitForAnswer(String expected) {
+    private String waitForAnswer(Mplayer mplayer,String expected) {
         // todo add the possibility to specify more options to be specified
         // todo use regexp matching instead of the beginning of a string
         String line = null;
         if (expected != null) {
             try {
-                while ((line = mplayerOutErr.readLine()) != null) {
+                mplayer.writeToPipe = true;
+                while ((line = mplayer.mplayerOutErr.readLine()) != null) {
                     logger.info("Reading line: " + line);
                     if (line.startsWith(expected)) {
                         return line;
                     }
                 }
+                mplayer.writeToPipe = false;
             }
             catch (IOException e) {
             }
@@ -290,23 +450,36 @@ public class JMPlayer {
         return line;
     }
 
+    @Override
+    public void finalize(){
+       logger.trace("Called finalize on JMPlayer!");
+    }
+
+
     public static void main(String[] args) throws IOException {
-        //JMPlayer jmPlayer = new JMPlayer();
+
+        String xmlConfigFile = "conf/config.xml";
+        logger.info("Using XML config at {}",xmlConfigFile);
+
+        Configuration.setXmlPath(xmlConfigFile);
         JMPlayer jmPlayer = JMPlayer.getInstance();
-        jmPlayer.setMPlayerPath("/usr/local/bin/mplayer");
+        //jmPlayer.setMPlayerPath("/usr/local/bin/mplayer");
         // open a video file
-        jmPlayer.open("/home/garyc/Videos/tv/Simpsons_SAVE_2017_03_26.mp4");
-        //jmPlayer.open(new File("/home/garyc/Videos/tv/Simpsons_SAVE_2017_03_26.mp4"));
+        //jmPlayer.open(MPLAYER_TYPE.PLAY,"dvb://1@KABC");
+        //Runtime.getRuntime().exec("/usr/local/bin/mplayer /home/garyc/Videos/movies/test.mp4");
+        jmPlayer.open(MPLAYER_TYPE.PLAY,"/home/garyc/Videos/movies/test.mp4");
         // skip 2 minutes
-        //jmPlayer.setTimePosition(120);
+        //jmPlayer.setTimePosition(MPLAYER_TYPE.PLAY,120);
         // skip 2 minutes
-        jmPlayer.setFullScreen();
+        jmPlayer.setFullScreen(MPLAYER_TYPE.PLAY);
         // set volume to 90%
-        jmPlayer.setVolume(90);        
+        //jmPlayer.setVolume(MPLAYER_TYPE.PLAY,90);        
         try{
-        Thread.sleep(5000);
-        }catch(Exception e){}
+            //new Thread(new MplayerHalter(jmPlayer)).start();
+        }catch(Exception e){
+            System.err.println("Exception is "+e.getMessage());
+        }
         System.err.println("Quitting");
-        jmPlayer.close();
+        //jmPlayer.close(MPLAYER_TYPE.PLAY);
     }
 }

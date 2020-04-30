@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 import javax.json.Json;
 import javax.json.JsonArray;
@@ -48,9 +50,12 @@ public class MplayerWS {
     private static final Logger logger = LoggerFactory.getLogger(MplayerWS.class);
     private final String MEDIA_TYPE_CHANNELS = "channels";
     private final String MEDIA_TYPE_MOVIES = "movies";
+    private final String DVB_PLAY_PREFIX = "dvb://1@";
+    private final String DVB_RECORD_PREFIX = "dvb://2@";
 
     //private static Process mplayerProcess = null;
     private JMPlayer jMPlayer = null;
+    private JMPlayer jMRecorder = null;
 
     private enum Action{
         PLAY, LIST
@@ -73,6 +78,8 @@ public class MplayerWS {
         logger.trace("In constructor");
         jMPlayer = JMPlayer.getInstance();
         jMPlayer.setMPlayerPath("/usr/local/bin/mplayer");
+        jMRecorder = JMPlayer.getInstance();
+        jMRecorder.setMPlayerPath("/usr/local/bin/mplayer");
 
     }
 
@@ -86,7 +93,7 @@ public class MplayerWS {
             public Exception apply(CallbackParams cp){
                 try{
                     logger.trace("Closing existing process");
-                    jMPlayer.close();
+                    jMPlayer.close(JMPlayer.MPLAYER_TYPE.PLAY);
                     cp.response.add("message","OK");
                     return null;
                 }catch(Exception ex){
@@ -132,7 +139,7 @@ public class MplayerWS {
                 final int seconds = Integer.parseInt(cp.params.get(seekKey));
                 try{
                     logger.trace("Seeking {} seconds",seconds);
-                    jMPlayer.seek(seconds);
+                    jMPlayer.seek(JMPlayer.MPLAYER_TYPE.PLAY,seconds);
                     cp.response.add("message","OK");
                     return null;
                 }catch(Exception ex){
@@ -141,6 +148,30 @@ public class MplayerWS {
             }
         };
         return executeHelper(seekFile,params);
+    }
+
+    @GET @Path("/volume")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response volume(@QueryParam("volume") String volumeParam) {
+        Map<String,String> params = new HashMap<String,String>();
+        final String volumeKey = "volume";
+        params.put(volumeKey,volumeParam);
+        Function<CallbackParams,Exception> volumeFile = 
+        new Function<CallbackParams,Exception>(){
+            @Override
+            public Exception apply(CallbackParams cp){
+                final int volume = Integer.parseInt(cp.params.get(volumeKey));
+                try{
+                    logger.trace("Setting volume to {}",volume);
+                    jMPlayer.setVolume(JMPlayer.MPLAYER_TYPE.PLAY,volume);
+                    cp.response.add("message","OK");
+                    return null;
+                }catch(Exception ex){
+                    return ex;
+                }
+            }
+        };
+        return executeHelper(volumeFile,params);
     }
 
     @GET @Path("/play")
@@ -165,9 +196,7 @@ public class MplayerWS {
                     //exec("mplayer -slave -quiet -idle "+fileName);
                     String pathName = null;
                     if(typeName.equals(MEDIA_TYPE_CHANNELS)){
-                        String dvbPrefix = 
-                        Configuration.getConfiguration().
-                        getDvbPrefix();
+                        String dvbPrefix = DVB_PLAY_PREFIX;
                         String channelName = 
                         Configuration.getConfiguration().
                         getChannelName(mediaName);
@@ -177,10 +206,9 @@ public class MplayerWS {
                         getMoviePath(mediaName);
                     }
                     logger.trace("As a precaution, closing existing process");
-                    jMPlayer.close();
-                    jMPlayer.open(pathName);
-                    jMPlayer.setFullScreen();
-                    jMPlayer.setVolume(100);
+                    jMPlayer.close(JMPlayer.MPLAYER_TYPE.PLAY);
+                    jMPlayer.open(JMPlayer.MPLAYER_TYPE.PLAY,pathName);
+                    //jMPlayer.setFullScreen(JMPlayer.MPLAYER_TYPE.PLAY);
                     cp.response.add("message","OK");
                     logger.trace("JMPlayer was opened.");
                     return null;
@@ -190,6 +218,56 @@ public class MplayerWS {
             }
         };
         return executeHelper(playFile,params);
+    }
+
+    @GET @Path("/record")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response record(
+    @QueryParam("channel") String channelParam, 
+    @QueryParam("duration_minutes") String durationMinutesParam){ 
+        Map<String,String> params = new HashMap<String,String>();
+        final String channelKey = "channel";
+        final String durationMinutesKey = "duration_minutes";
+        params.put(channelKey,channelParam);
+        params.put(durationMinutesKey,durationMinutesParam);
+        Function<CallbackParams,Exception> recordFile = 
+        new Function<CallbackParams,Exception>(){
+            @Override
+            public Exception apply(CallbackParams cp){
+                final String channel = cp.params.get(channelKey);
+                final String durationMinutes = 
+                cp.params.get(durationMinutesKey);
+
+                try{
+                    DateTimeFormatter formatter = 
+                    DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+                    String timeStr = LocalDateTime.now().
+                    format(formatter);
+      		    String fileName = "recording_"+timeStr+".m2t";
+    
+                    logger.trace("Recording channel {} for {} minutes. "+
+                    "File name is {}",channel,durationMinutes,fileName);
+                    int durationSeconds = 60 * 
+                    Integer.parseInt(durationMinutes);
+
+                    String dvbPrefix = DVB_RECORD_PREFIX;
+                    String channelName = 
+                    Configuration.getConfiguration().
+                    getChannelName(channel);
+                    String inputPath = dvbPrefix + channelName;
+                    boolean returnCode = 
+                    jMRecorder.record(JMPlayer.MPLAYER_TYPE.RECORD,inputPath,
+                    fileName,durationSeconds);
+                    cp.response.add("recording",Boolean.toString(returnCode));
+                    cp.response.add("filename",fileName);
+                    logger.trace("JMRecorder was started.");
+                    return null;
+                }catch(Exception ex){
+                    return ex;
+                }
+            }
+        };
+        return executeHelper(recordFile,params);
     }
 
 //    @GET @Path("/movie_info")

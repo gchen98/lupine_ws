@@ -75,11 +75,11 @@ public class Configuration{
         }
     }
 
-    public String getDvbPrefix(){
-        String dvbPrefix = config.getString("dvb_prefix");
-        logger.trace("Using DVB prefix of {}",dvbPrefix);
-        return dvbPrefix;
-    }
+//    public String getDvbPrefix(){
+//        String dvbPrefix = config.getString("dvb_prefix");
+//        logger.trace("Using DVB prefix of {}",dvbPrefix);
+//        return dvbPrefix;
+//    }
 
     public String getMplayerOptions(){
         String mplayerOptions = config.getString("mplayer_options");
@@ -91,7 +91,12 @@ public class Configuration{
         String logPath = config.getString("access_logs");
         logger.trace("Using access logs path of {}",logPath);
         return logPath;
+    }
 
+    public String getRecordingDir(){
+        String recordingDir = config.getString("recording_dir");
+        logger.trace("Using recording dir path of {}",recordingDir);
+        return recordingDir;
     }
 
     public int getPort(PORT_TYPE portType){
